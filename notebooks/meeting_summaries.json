@@ -1,0 +1,55 @@
+[
+  {
+    "summary": "The meeting focused on the ease of belief in information sharing, with Morgan advocating for a more challenging approach. Participants discussed technical aspects of wireless devices and their functionality, as well as the need for input on database formats for linking transcripts and annotations.",
+    "action_items": [
+      {
+        "owner": "unknown",
+        "task": "Provide input on database formats for linking transcripts and annotations",
+        "due_date": null
+      }
+    ],
+    "key_decisions": [],
+    "tension_points": [
+      "Disagreement on how easy to make information sharing for users"
+    ],
+    "meeting_id": "Bdb001.interaction_90s",
+    "model": "gpt-4o-mini"
+  },
+  {
+    "summary": "The meeting focused on the technical setup for reading digit strings, emphasizing the importance of individual readings rather than simultaneous ones to avoid cognitive overload. Participants were instructed on how to properly read and pause between lines for transcription clarity.",
+    "action_items": [
+      {
+        "owner": "unknown",
+        "task": "Ensure wireless microphones are functioning properly",
+        "due_date": null
+      },
+      {
+        "owner": "unknown",
+        "task": "Read digit strings individually with pauses for transcription",
+        "due_date": null
+      }
+    ],
+    "key_decisions": [
+      "Participants will read digit strings individually rather than simultaneously."
+    ],
+    "tension_points": [
+      "Potential confusion over the reading process and the cognitive load of simultaneous readings."
+    ],
+    "meeting_id": "Bed002.interaction_90s",
+    "model": "gpt-4o-mini"
+  },
+  {
+    "summary": "The meeting involved a discussion about the progress of certain tasks, with participants confirming their understanding and control over the situation. There was a focus on ensuring that previous actions were completed satisfactorily.",
+    "action_items": [
+      {
+        "owner": "unknown",
+        "task": "Confirm completion of previous tasks",
+        "due_date": null
+      }
+    ],
+    "key_decisions": [],
+    "tension_points": [],
+    "meeting_id": "Bed003.interaction_90s",
+    "model": "gpt-4o-mini"
+  }
+]
