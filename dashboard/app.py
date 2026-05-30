@@ -1,6 +1,7 @@
 import ast
 import json
 import os
+import sys
 from pathlib import Path
 
 import streamlit as st
@@ -46,6 +47,14 @@ st.set_page_config(page_title="Meeting Health Dashboard", layout="wide")
 
 APP_DIR = Path(__file__).resolve().parent
 LOCAL_PROJECT_DIR = APP_DIR.parent
+if str(LOCAL_PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(LOCAL_PROJECT_DIR))
+
+try:
+    from dashboard_ext.assistant_tab import render_assistant_tab
+except ImportError:
+    render_assistant_tab = None
+
 PROJECT_DIR = Path("/Users/saiteja/Desktop/meeting-intelligence-platform")
 NOTEBOOK_DIR = PROJECT_DIR / "notebooks"
 SEARCH_DIRS = [
@@ -116,6 +125,39 @@ def load_dataset(name: str, upload_file=None):
     if path is None:
         return None, "Not found"
     return load_csv_from_path(str(path)), f"Loaded automatically from {path.parent}"
+
+
+def get_recordings_dir() -> Path:
+    load_private_env()
+    configured = Path(os.getenv("RECORDINGS_DIR", "./recordings")).expanduser()
+    return configured if configured.is_absolute() else LOCAL_PROJECT_DIR / configured
+
+
+def list_assistant_sessions() -> list[str]:
+    recordings_dir = get_recordings_dir()
+    if not recordings_dir.exists():
+        return []
+    sessions = []
+    for folder in recordings_dir.iterdir():
+        if not folder.is_dir():
+            continue
+        if (folder / "pipeline").exists() or (folder / "session_metadata.json").exists():
+            sessions.append(folder.name)
+    return sorted(sessions, reverse=True)
+
+
+def assistant_session_dir(session_id: str | None) -> Path | None:
+    if not session_id:
+        return None
+    path = get_recordings_dir() / session_id
+    return path if path.exists() else None
+
+
+def load_assistant_dataset(session_dir: Path, name: str):
+    path = session_dir / "pipeline" / DATA_FILES[name]
+    if not path.exists():
+        return None, f"Missing from assistant session: {path}"
+    return load_csv_from_path(str(path)), f"Loaded from assistant session {session_dir.name}"
 
 
 @st.cache_data
@@ -353,10 +395,35 @@ with st.sidebar.expander("Optional manual overrides"):
         "summaries": st.file_uploader("Meeting summaries", type=["csv"]),
     }
 
+assistant_sessions = list_assistant_sessions()
+selected_assistant_session = None
+selected_assistant_session_dir = None
+st.sidebar.subheader("Load from Assistant Session")
+if assistant_sessions:
+    selected_assistant_session = st.sidebar.selectbox(
+        "Assistant session",
+        [""] + assistant_sessions,
+        format_func=lambda value: "Use prepared/manual files" if value == "" else value,
+    )
+    selected_assistant_session_dir = assistant_session_dir(selected_assistant_session)
+    if selected_assistant_session_dir is not None:
+        st.sidebar.caption(f"Using {selected_assistant_session_dir}")
+else:
+    st.sidebar.caption("No assistant sessions found yet.")
+
 dataframes = {}
 statuses = {}
 for name in DATA_FILES:
     dataframes[name], statuses[name] = load_dataset(name, uploaded_files.get(name))
+
+if selected_assistant_session_dir is not None:
+    for name in ["metrics", "chunks", "moments", "topics"]:
+        assistant_df, assistant_status = load_assistant_dataset(selected_assistant_session_dir, name)
+        if assistant_df is not None:
+            dataframes[name] = assistant_df
+            statuses[name] = assistant_status
+        else:
+            st.sidebar.warning(f"{DATA_FILES[name]} missing for selected assistant session")
 
 for label, name in [
     ("Meeting scores", "metrics"),
@@ -415,8 +482,8 @@ score_cols[2].metric("Tension", f"{m_row['tension_score']:.1f}")
 score_cols[3].metric("Overall Tone", f"{m_row.get('meeting_health_valence', np.nan):.2f}" if "meeting_health_valence" in m_row.index else "N/A")
 score_cols[4].metric("Status", display_label(m_row.get("predicted_health_label", "N/A")))
 
-overview_tab, detail_tab, topics_tab, ask_tab, source_tab = st.tabs([
-    "Overview", "Meeting Details", "Topics", "Ask", "Source Data"
+overview_tab, detail_tab, topics_tab, ask_tab, assistant_session_tab, source_tab = st.tabs([
+    "Overview", "Meeting Details", "Topics", "Ask", "Assistant Session", "Source Data"
 ])
 
 with overview_tab:
@@ -566,6 +633,12 @@ with ask_tab:
             st.dataframe(pd.DataFrame([doc.metadata for doc in docs]), use_container_width=True)
         except Exception as exc:
             st.error(f"Could not answer the question: {exc}")
+
+with assistant_session_tab:
+    if render_assistant_tab is None:
+        st.info("Assistant session extension is not available in this environment.")
+    else:
+        render_assistant_tab(selected_assistant_session_dir, selected_assistant_session)
 
 with source_tab:
     st.subheader("Loaded Data")

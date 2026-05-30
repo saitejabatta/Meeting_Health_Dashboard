@@ -1,0 +1,22 @@
+# requirements_assistant.txt
+python-dotenv~=1.0
+openai~=1.30
+chromadb~=0.5
+sentence-transformers~=3.0
+rich~=13.0
+click~=8.1
+elevenlabs~=1.0
+pyttsx3~=2.90
+sounddevice~=0.4
+pydub~=0.25
+faster-whisper~=1.0
+pyannote.audio~=3.1
+numpy~=1.26
+scipy~=1.13
+sendgrid~=6.11
+slack-sdk~=3.27
+selenium~=4.20
+undetected-chromedriver~=3.5
+pyvirtualdisplay~=3.0
+pygetwindow~=0.0.9
+pyautogui~=0.9

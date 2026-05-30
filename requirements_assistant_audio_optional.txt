@@ -1,0 +1,8 @@
+# requirements_assistant_audio_optional.txt
+# Optional PyAudio backend. The assistant defaults to sounddevice, so this is
+# only needed if you later add code that explicitly imports pyaudio.
+#
+# macOS setup:
+# brew install portaudio
+# python3 -m pip install -r requirements_assistant_audio_optional.txt
+pyaudio~=0.2

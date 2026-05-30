@@ -1,0 +1,8 @@
+# requirements_assistant_optional.txt
+# Optional fallback Whisper backend. Install only if you specifically need
+# openai-whisper instead of faster-whisper.
+#
+# If this fails with "No module named 'pkg_resources'", run:
+# python3 -m pip install "setuptools<81" wheel
+# python3 -m pip install --no-build-isolation -r requirements_assistant_optional.txt
+openai-whisper==20240930
