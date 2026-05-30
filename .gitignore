@@ -16,6 +16,8 @@ node_modules/
 *.mp3
 datasets/
 meeting_audio/
+recordings/
+dashboard/data/
 
 # Mac
 .DS_Store
