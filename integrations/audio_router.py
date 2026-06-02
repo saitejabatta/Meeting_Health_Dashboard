@@ -48,6 +48,16 @@ class AudioRouter:
 
     def setup_instructions(self) -> str:
         """Return setup instructions for the current platform."""
+        if self.device_name and self.device_name != self.default_device_name():
+            return (
+                f"Make sure the meeting app is open with audio connected, then set "
+                f"VIRTUAL_AUDIO_DEVICE_NAME={self.device_name}. If that device is not exposed by the app, "
+                f"use the platform virtual-audio setup instead: {self._platform_virtual_audio_instructions()}"
+            )
+        return self._platform_virtual_audio_instructions()
+
+    def _platform_virtual_audio_instructions(self) -> str:
+        """Return platform-specific virtual-audio setup instructions."""
         if self.platform_name == "Darwin":
             return (
                 "Install BlackHole-2ch with Homebrew, create a Multi-Output Device in Audio MIDI Setup "

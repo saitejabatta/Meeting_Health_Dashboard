@@ -22,6 +22,11 @@ from assistant.responder import Responder
 from assistant.speaker_tracker import SpeakerTracker, assign_speakers_to_segments
 from assistant.transcriber import LiveTranscriber, TranscriptSegment, normalize_audio_file_to_wav
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
 if TYPE_CHECKING:
     from post_meeting.pipeline_runner import PipelineOutputPaths
 
@@ -173,6 +178,41 @@ class CommandParser:
             if tip and self.session.responder:
                 self.session.responder.whisper_to_user(tip)
             return tip or "No tip is relevant right now."
+        if name in {"last", "transcript"}:
+            if not self.session.transcriber:
+                return "Transcriber is not ready."
+            context = self.session.transcriber.get_recent_context(120)
+            return context or "No transcript has been captured yet."
+        if name == "listen":
+            if not self.session.audio_capture:
+                return "Audio capture is not ready."
+            stats = self.session.audio_capture.get_stats()
+            backend = getattr(self.session.transcriber, "_backend", "unknown") if self.session.transcriber else "unknown"
+            segment_count = len(self.session.transcriber.get_full_transcript()) if self.session.transcriber else 0
+            return (
+                f"capture_started={stats.started}, captured_seconds={stats.captured_seconds:.1f}, "
+                f"queued_chunks={stats.queued_chunks}, rms={stats.rms:.1f}, peak={stats.peak}, "
+                f"whisper_backend={backend}, transcript_segments={segment_count}"
+            )
+        if name == "audio":
+            if not self.session.responder:
+                return "Responder is not ready."
+            output_name = self.session.responder.audio_output_device_name or "default speaker"
+            monitor = self.session.responder.monitor_default_speaker
+            return f"Assistant speech output: {output_name}. Local speaker monitor: {monitor}."
+        if name == "store":
+            return self.session.store_live_artifacts()
+        if name in {"answer", "respond"}:
+            if not self.session.agent or not self.session.transcriber:
+                return "Agent is not ready."
+            context = self.session.transcriber.get_recent_context(120)
+            if not context:
+                return "No transcript has been captured yet."
+            response = self.session.agent.generate_response(context, "manual answer command")
+            if self.session.responder and self.session.briefing:
+                self.session.responder.speak(response, self.session.briefing.agent_mode)
+                self.session.runtime_memory.log_agent_response("manual !answer command", response)
+            return response
         if name == "speak":
             if not argument.strip():
                 return "Usage: !speak <text>"
@@ -235,6 +275,8 @@ class MeetingSession:
 
     def __init__(self) -> None:
         """Initialise empty session state."""
+        if load_dotenv is not None:
+            load_dotenv()
         self.briefing: Briefing | None = None
         self.session_id = ""
         self.audio_capture: AudioCapture | None = None
@@ -250,6 +292,7 @@ class MeetingSession:
         self._tasks: list[asyncio.Task[None]] = []
         self._source: JoinSource = "both"
         self._chunk_offset_seconds = 0.0
+        self.focus_mode = os.getenv("ASSISTANT_FOCUS_MODE", "false").strip().lower() in {"1", "true", "yes", "y"}
 
     async def start(self, briefing: Briefing, source: JoinSource = "both") -> None:
         """Start a live meeting session and run until !end, stop(), or KeyboardInterrupt."""
@@ -260,9 +303,10 @@ class MeetingSession:
         self._tasks = [
             asyncio.create_task(self._transcription_loop(), name="transcription_loop"),
             asyncio.create_task(self._command_loop(), name="command_loop"),
-            asyncio.create_task(self._checklist_loop(), name="checklist_loop"),
             asyncio.create_task(self._comprehension_loop(), name="comprehension_loop"),
         ]
+        if not self.focus_mode:
+            self._tasks.append(asyncio.create_task(self._checklist_loop(), name="checklist_loop"))
         try:
             await self._stop_event.wait()
         finally:
@@ -329,6 +373,20 @@ class MeetingSession:
         timestamp = self.runtime_memory.full_transcript[-1].end if self.runtime_memory.full_transcript else time.time()
         self.runtime_memory.key_moments.append(KeyMoment(timestamp, text, "user_flag", "medium"))
 
+    def store_live_artifacts(self) -> str:
+        """Persist the current transcript and metadata without ending the session."""
+        if self.recorder is None or self.briefing is None:
+            return "Session was not started."
+        transcript = self.transcriber.get_full_transcript() if self.transcriber else self.runtime_memory.full_transcript
+        if not transcript:
+            return "No transcript has been captured yet."
+        transcript_paths = self.recorder.save_transcript(transcript, self.session_id)
+        metadata_path = self.recorder.save_session_metadata(self.briefing, self.runtime_memory, self.session_id, self.checklist)
+        return (
+            f"Stored {len(transcript)} transcript segments. "
+            f"Transcript: {transcript_paths.get('txt')}. Metadata: {metadata_path}"
+        )
+
     def _initialise_components(self, briefing: Briefing, source: JoinSource) -> None:
         self.briefing = briefing
         self.session_id = generate_session_id(briefing.meeting_title)
@@ -341,6 +399,7 @@ class MeetingSession:
         self.recorder = Recorder()
         self.checklist = DoNotMissChecklist.from_briefing(briefing)
         self.runtime_memory = RuntimeMemory(talking_points_pending=list(briefing.talking_points))
+        self.focus_mode = os.getenv("ASSISTANT_FOCUS_MODE", "false").strip().lower() in {"1", "true", "yes", "y"}
         memory = learn_from_briefing(briefing)
         self.agent = MeetingAgent(
             briefing,
@@ -350,6 +409,8 @@ class MeetingSession:
             self.responder,
             self.runtime_memory,
         )
+        if self.focus_mode:
+            self.agent.mute()
         self.command_parser = CommandParser(self)
 
     async def _transcription_loop(self) -> None:

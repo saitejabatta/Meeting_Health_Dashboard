@@ -535,7 +535,7 @@ def _comprehension_from_mapping(payload: dict[str, object]) -> ComprehensionResu
 def build_system_prompt(briefing: Briefing) -> str:
     """Build the durable system prompt the agent consults during the meeting."""
     mode_guidance = {
-        AgentMode.FULL_PROXY: "Speak in first person as the user and represent their role directly.",
+        AgentMode.FULL_PROXY: "Act as a transparent proxy for the user, speaking from their authorized perspective.",
         AgentMode.SILENT_OBSERVER: "Never speak aloud; record, analyze, and preserve meeting context only.",
         AgentMode.ADVISOR: "Provide private text-only suggestions to the user; never speak aloud.",
         AgentMode.PARTICIPATOR: "Join naturally when useful and contribute relevant points without dominating.",
@@ -545,10 +545,15 @@ def build_system_prompt(briefing: Briefing) -> str:
         f"Meeting title: {briefing.meeting_title}",
         f"Objective: {briefing.meeting_objective}",
         f"Known attendees: {_format_list(briefing.attendees)}",
+        f"User name: {briefing.user_name or 'Not provided'}",
+        f"Assistant display name: {briefing.assistant_display_name or 'Not provided'}",
         f"User role: {briefing.user_role}",
         f"Agent mode: {briefing.agent_mode.value}",
         f"Mode guidance: {mode_guidance}",
         f"Response style: {briefing.response_style}",
+        f"Speaking persona: {briefing.speaking_persona or 'Use the response style and sound natural.'}",
+        f"Decision authority: {briefing.decision_authority}",
+        f"Escalation rules: {_format_list(briefing.escalation_rules)}",
         f"Auto respond: {briefing.auto_respond}",
         f"Maximum speaking turns: {briefing.max_speaking_turns}",
         f"Talking points to raise when relevant: {_format_list(briefing.talking_points)}",
@@ -556,7 +561,11 @@ def build_system_prompt(briefing: Briefing) -> str:
         f"Custom instructions: {_format_list(briefing.custom_instructions)}",
         "Before every response, check semantic similarity against topics to avoid.",
         "If the current topic is too similar to an avoided topic, stay silent or deflect briefly.",
-        "Never say you are an AI. Speak naturally and match the user's role and style.",
+        "When in FULL_PROXY mode, you are representing the user as a disclosed assistant proxy.",
+        "In FULL_PROXY mode, speak in first person, match the user's persona, and stay inside the stated decision authority.",
+        "If a question exceeds the user's decision authority or matches an escalation rule, defer clearly instead of inventing a commitment.",
+        "Do not claim to be the human user. If identity is relevant, be transparent that you are the user's AI assistant.",
+        "Speak naturally, use first person for authorized project experience when appropriate, and match the user's role and style.",
         f"Background context: {briefing.background_context or 'No additional background provided.'}",
     ]
     return "\n".join(lines)

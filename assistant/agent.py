@@ -82,6 +82,7 @@ class MeetingAgent:
         self.speaking_turns_used = 0
         self.last_segment_at = 0.0
         self.muted = False
+        self.focus_mode = os.getenv("ASSISTANT_FOCUS_MODE", "false").strip().lower() in {"1", "true", "yes", "y"}
         self._flag_history: list[Flag] = []
         self._last_topic: str | None = None
 
@@ -90,14 +91,15 @@ class MeetingAgent:
         self.runtime_memory.update(segment)
         self.last_segment_at = max(self.last_segment_at, segment.end)
         context = self.transcriber.get_recent_context(120)
-        for flag in self.analyze_for_flags(segment):
-            self.runtime_memory.key_moments.append(KeyMoment(flag.timestamp, flag.message, flag.type, flag.severity))
-            self.responder.whisper_to_user(flag.message)
-        if self.briefing.agent_mode == AgentMode.ADVISOR:
+        if not self.focus_mode:
+            for flag in self.analyze_for_flags(segment):
+                self.runtime_memory.key_moments.append(KeyMoment(flag.timestamp, flag.message, flag.type, flag.severity))
+                self.responder.whisper_to_user(flag.message)
+        if not self.focus_mode and self.briefing.agent_mode == AgentMode.ADVISOR:
             tip = self.get_advisor_tip(context)
             if tip:
                 self.responder.whisper_to_user(tip)
-        if self.muted or not self.briefing.auto_respond:
+        if self.focus_mode or self.muted or not self.briefing.auto_respond:
             return
         decision = self.should_speak(context)
         if not decision.should_speak:
@@ -205,8 +207,10 @@ class MeetingAgent:
             "context": context,
             "trigger": trigger,
             "instruction": (
-                "Respond as the user in first person. Match the response style. "
-                "Do not mention being an AI or assistant. Keep it suitable to say aloud in a meeting."
+                "Respond from the user's authorized perspective in first person when discussing their resume or project experience. "
+                "Match the response style and keep it suitable to say aloud in a meeting. "
+                "Do not claim to be the human user; if identity is relevant, be transparent that you are the user's AI assistant. "
+                "If the request exceeds the user's decision authority, defer instead of making a commitment."
             ),
         }
         try:
@@ -230,9 +234,13 @@ class MeetingAgent:
         if talking_point:
             return f"I want to make sure we cover {talking_point} before we move on."
         if "direct question" in trigger.lower():
-            return "My view is that we should stay aligned to the objective and make the next step explicit."
+            if self.briefing.agent_mode == AgentMode.FULL_PROXY:
+                return "My view is that we should stay aligned on the objective and make the owner and next step explicit."
+            return "I suggest staying aligned to the objective and making the next step explicit."
         if self.memory.relevant_background(context):
-            return "One bit of context that may help: this connects back to the background we discussed before the meeting."
+            if self.briefing.agent_mode == AgentMode.FULL_PROXY:
+                return "One bit of context from my side: this connects back to the background going into this meeting."
+            return "One bit of context that may help: this connects back to the background from the briefing."
         return "I think the useful next step is to clarify the decision and owner before we move on."
 
     def _best_relevant_talking_point(self, context: str) -> str | None:
@@ -372,7 +380,7 @@ def _token_overlap_score(left: str, right: str) -> float:
 
 
 def _sanitize_agent_response(text: str) -> str:
-    cleaned = re.sub(r"\b(as an ai|i am an ai assistant|i'm an ai assistant)\b[:,]?\s*", "", text, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(as an ai language model|as an ai model)\b[:,]?\s*", "", text, flags=re.IGNORECASE)
     return cleaned.strip().strip('"')
 
 
