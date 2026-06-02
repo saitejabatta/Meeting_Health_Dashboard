@@ -34,6 +34,13 @@ class Responder:
             load_dotenv()
         self.audio_capture = audio_capture
         self.virtual_audio_device_name = os.getenv("VIRTUAL_AUDIO_DEVICE_NAME", "").strip()
+        self.audio_output_device_name = os.getenv("ASSISTANT_AUDIO_OUTPUT_DEVICE_NAME", "").strip()
+        self.monitor_default_speaker = os.getenv("ASSISTANT_MONITOR_DEFAULT_SPEAKER", "false").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "y",
+        }
         self.silence_rms_threshold = float(os.getenv("SILENCE_RMS_THRESHOLD", "350"))
         self.spoken_log: list[dict[str, object]] = []
 
@@ -121,6 +128,18 @@ class Responder:
             return None
 
     def _play_audio(self, audio_path: Path) -> None:
+        if self.audio_output_device_name:
+            played_to_named_device = self._play_audio_to_named_device(audio_path)
+            if not self.monitor_default_speaker:
+                if not played_to_named_device:
+                    print(
+                        f"\nAssistant audio output device '{self.audio_output_device_name}' was not available. "
+                        "No speaker fallback was used because ASSISTANT_MONITOR_DEFAULT_SPEAKER=false.\n"
+                    )
+                return
+            if played_to_named_device:
+                # Also play locally when the user explicitly asks to monitor.
+                pass
         try:
             from pydub import AudioSegment
             from pydub.playback import play
@@ -128,6 +147,25 @@ class Responder:
             play(AudioSegment.from_file(audio_path))
         except Exception as exc:
             logger.warning("Audio playback failed; speech text was logged instead: %s", exc)
+
+    def _play_audio_to_named_device(self, audio_path: Path) -> bool:
+        try:
+            import numpy as np
+            import sounddevice as sd
+            from pydub import AudioSegment
+
+            segment = AudioSegment.from_file(audio_path).set_channels(1).set_frame_rate(16000).set_sample_width(2)
+            samples = np.array(segment.get_array_of_samples(), dtype=np.int16)
+            device_index = _find_output_device(sd, self.audio_output_device_name)
+            if device_index is None:
+                logger.warning("Assistant audio output device '%s' was not found.", self.audio_output_device_name)
+                return False
+            sd.play(samples, samplerate=16000, device=device_index)
+            sd.wait()
+            return True
+        except Exception as exc:
+            logger.warning("Named-device audio playback failed; falling back to default output: %s", exc)
+            return False
 
     def _recent_audio_rms(self) -> float:
         if self.audio_capture is None or not hasattr(self.audio_capture, "get_full_recording"):
@@ -187,3 +225,12 @@ def _rms_int16(frames: bytes) -> float:
         sample = int.from_bytes(frames[index : index + 2], "little", signed=True)
         total += sample * sample
     return (total / sample_count) ** 0.5
+
+
+def _find_output_device(sounddevice_module: object, device_name: str) -> int | None:
+    needle = device_name.lower()
+    for index, device in enumerate(sounddevice_module.query_devices()):
+        name = str(device.get("name", "")).lower()
+        if needle in name and int(device.get("max_output_channels", 0)) > 0:
+            return index
+    return None

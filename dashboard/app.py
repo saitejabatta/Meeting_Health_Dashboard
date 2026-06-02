@@ -55,6 +55,16 @@ try:
 except ImportError:
     render_assistant_tab = None
 
+try:
+    from dashboard_ext.assistant_control import render_assistant_control
+except ImportError:
+    render_assistant_control = None
+
+try:
+    from dashboard_ext.rag_evaluation import evaluate_rag_turn
+except ImportError:
+    evaluate_rag_turn = None
+
 PROJECT_DIR = Path("/Users/saiteja/Desktop/meeting-intelligence-platform")
 NOTEBOOK_DIR = PROJECT_DIR / "notebooks"
 SEARCH_DIRS = [
@@ -482,8 +492,8 @@ score_cols[2].metric("Tension", f"{m_row['tension_score']:.1f}")
 score_cols[3].metric("Overall Tone", f"{m_row.get('meeting_health_valence', np.nan):.2f}" if "meeting_health_valence" in m_row.index else "N/A")
 score_cols[4].metric("Status", display_label(m_row.get("predicted_health_label", "N/A")))
 
-overview_tab, detail_tab, topics_tab, ask_tab, assistant_session_tab, source_tab = st.tabs([
-    "Overview", "Meeting Details", "Topics", "Ask", "Assistant Session", "Source Data"
+overview_tab, detail_tab, topics_tab, ask_tab, assistant_control_tab, assistant_session_tab, source_tab = st.tabs([
+    "Overview", "Meeting Details", "Topics", "Ask", "Assistant Control", "Assistant Session", "Source Data"
 ])
 
 with overview_tab:
@@ -629,6 +639,22 @@ with ask_tab:
                 ("user", f"Context:\n{context}\n\nQuestion: {question}"),
             ])
             st.write(answer.content)
+            if evaluate_rag_turn is not None:
+                st.markdown("**RAG Evaluation**")
+                original_meeting_text = meeting_text_from_chunks(selected_meeting, chunk_level_df)
+                evaluation = evaluate_rag_turn(question, answer.content, docs, llm, original_meeting_text)
+                metric_cols = st.columns(3)
+                metric_cols[0].metric("Hallucination", f"{evaluation.hallucination_percentage:.1f}%")
+                metric_cols[1].metric("Faithfulness", f"{evaluation.faithfulness_percentage:.1f}%")
+                metric_cols[2].metric("Meeting Relevance", f"{evaluation.meeting_relevance_percentage:.1f}%")
+                with st.expander("Evaluation details"):
+                    st.write(evaluation.evaluation_reason)
+                    detail_cols = st.columns(4)
+                    detail_cols[0].metric("Query Coverage", f"{evaluation.query_coverage * 100:.1f}%")
+                    detail_cols[1].metric("Mean Retrieved Relevance", f"{evaluation.mean_document_relevance * 100:.1f}%")
+                    detail_cols[2].metric("Best Retrieved Relevance", f"{evaluation.max_document_relevance * 100:.1f}%")
+                    detail_cols[3].metric("Citation Coverage", f"{evaluation.citation_coverage * 100:.1f}%")
+                    st.dataframe(pd.DataFrame(evaluation.document_scores), use_container_width=True, hide_index=True)
             st.markdown("**Relevant Meeting Segments**")
             st.dataframe(pd.DataFrame([doc.metadata for doc in docs]), use_container_width=True)
         except Exception as exc:
@@ -639,6 +665,12 @@ with assistant_session_tab:
         st.info("Assistant session extension is not available in this environment.")
     else:
         render_assistant_tab(selected_assistant_session_dir, selected_assistant_session)
+
+with assistant_control_tab:
+    if render_assistant_control is None:
+        st.info("Assistant control extension is not available in this environment.")
+    else:
+        render_assistant_control(get_recordings_dir())
 
 with source_tab:
     st.subheader("Loaded Data")

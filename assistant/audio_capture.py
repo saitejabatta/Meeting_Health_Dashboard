@@ -9,6 +9,7 @@ import os
 import queue
 import threading
 import wave
+from dataclasses import dataclass
 from typing import Literal
 
 try:
@@ -21,6 +22,17 @@ logger = logging.getLogger(__name__)
 
 class AudioCaptureError(RuntimeError):
     """Raised when live audio capture cannot be started or read."""
+
+
+@dataclass
+class AudioCaptureStats:
+    """Small diagnostic snapshot for live audio capture."""
+
+    started: bool
+    captured_seconds: float
+    queued_chunks: int
+    rms: float
+    peak: int
 
 
 class AudioCapture:
@@ -116,6 +128,19 @@ class AudioCapture:
         with self._lock:
             return _pcm_to_wav(bytes(self._full_pcm), self.sample_rate, self.channels, self.sample_width)
 
+    def get_stats(self) -> AudioCaptureStats:
+        """Return capture diagnostics without consuming queued audio."""
+        with self._lock:
+            pcm = bytes(self._full_pcm)
+        frame_count = len(pcm) // self.sample_width // self.channels
+        return AudioCaptureStats(
+            started=self._started,
+            captured_seconds=frame_count / self.sample_rate if self.sample_rate else 0.0,
+            queued_chunks=self._queue.qsize(),
+            rms=_rms_int16(pcm[-self.sample_rate * self.sample_width * self.channels :]),
+            peak=_peak_int16(pcm[-self.sample_rate * self.sample_width * self.channels :]),
+        )
+
     def _on_audio_data(self, indata: bytes, frames: int, time_info: object, status: object) -> None:
         if status:
             logger.debug("Audio stream status: %s", status)
@@ -156,3 +181,24 @@ def _pcm_to_wav(pcm_bytes: bytes, sample_rate: int, channels: int, sample_width:
         wav_file.setframerate(sample_rate)
         wav_file.writeframes(pcm_bytes)
     return output.getvalue()
+
+
+def _rms_int16(frames: bytes) -> float:
+    if not frames:
+        return 0.0
+    sample_count = len(frames) // 2
+    if sample_count == 0:
+        return 0.0
+    total = 0.0
+    for index in range(0, len(frames) - 1, 2):
+        sample = int.from_bytes(frames[index : index + 2], "little", signed=True)
+        total += sample * sample
+    return (total / sample_count) ** 0.5
+
+
+def _peak_int16(frames: bytes) -> int:
+    peak = 0
+    for index in range(0, len(frames) - 1, 2):
+        sample = abs(int.from_bytes(frames[index : index + 2], "little", signed=True))
+        peak = max(peak, sample)
+    return peak

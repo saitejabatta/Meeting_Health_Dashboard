@@ -69,6 +69,18 @@ http://localhost:8501
 
 ## AI Meeting Assistant - Feature 2 Audio Setup
 
+The AI Meeting Assistant is designed to attend or process meetings on behalf of the user. It can listen, take notes, track decisions and action items, privately advise the user, and in `FULL_PROXY` mode speak in first person as the user within the authority and style provided in the briefing.
+
+Recommended proxy briefing fields:
+
+- your name and role
+- a disclosed assistant display name, such as `Sai - AI Assistant`
+- how you naturally speak
+- what the assistant may decide or commit to
+- what it must defer back to you
+- talking points it should raise
+- topics it must avoid
+
 Feature 2 adds live audio capture, live Whisper transcription, and speaker tracking modules under `assistant/`.
 
 Install assistant dependencies:
@@ -164,6 +176,16 @@ python3 -c "from post_meeting.pipeline_runner import run_existing_pipeline; prin
 ```
 
 This writes dashboard-compatible CSVs into `recordings/YOUR_SESSION_ID/pipeline/`. In the Streamlit sidebar, use **Load from Assistant Session** to select the session. The normal dashboard charts will load those CSVs, and the **Assistant Session** tab will show metadata, checklist status, agent activity, key moments, audio, and transcript.
+
+The **Assistant Control** tab gives you a browser-based setup surface for testing the assistant. You can upload a TXT, Markdown, PDF, or DOCX resume, generate a meeting briefing for an advisor or proxy interview run, save that briefing, upload recorded audio for file-mode testing, and browse saved assistant session files. Proxy mode uses a transparent display name such as `Sai - AI Assistant`; the assistant can answer from your authorized resume/project context without pretending to be the human user. PDF and DOCX extraction use `pypdf` and `python-docx` from `requirements_assistant.txt`.
+
+The Ask tab also reports RAG answer-quality metrics after each answer:
+
+- **Hallucination**: estimated percentage of answer content not supported by the retrieved context.
+- **Faithfulness**: estimated percentage of answer claims supported by the retrieved context.
+- **Meeting Relevance**: estimated percentage of answer content relevant to the original meeting transcript.
+
+When an API key is available, a strict LLM judge scores these three metrics. If the judge is unavailable, the dashboard falls back to lexical overlap estimates. The details panel also shows query coverage, retrieved-context relevance, citation coverage, and per-document matched terms.
 
 Feature 7 adds the session manager and CLI:
 

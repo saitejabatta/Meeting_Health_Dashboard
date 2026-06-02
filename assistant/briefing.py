@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
@@ -44,6 +44,11 @@ class Briefing:
     custom_instructions: list[str]
     max_speaking_turns: int
     auto_respond: bool
+    user_name: str = ""
+    speaking_persona: str = ""
+    decision_authority: str = ""
+    escalation_rules: list[str] = field(default_factory=list)
+    assistant_display_name: str = ""
 
 
 def parse_briefing_from_text(raw_input: str) -> Briefing:
@@ -65,9 +70,13 @@ def collect_briefing_interactive() -> Briefing:
         questions = [
             ("meeting", "What is this meeting about? (title and objective)"),
             ("attendees", "Who will be attending? (names/roles, or skip)"),
+            ("identity", "What name and role should I use if I speak on your behalf?"),
             ("mode", f"What role should I play? Options: {_mode_options()}"),
+            ("persona", "How should I sound if I speak as you? (tone, phrases, style, or skip)"),
+            ("authority", "What am I allowed to decide or commit to on your behalf?"),
             ("points", "Are there specific points you want me to raise? (list them or skip)"),
             ("avoid", "Any topics I should absolutely avoid?"),
+            ("escalation", "When should I defer or ask you before answering?"),
             ("context", "Any background context I should know?"),
             ("style", "How should I sound? (formal / casual / concise / detailed)"),
             ("respond", "Should I respond automatically, or only when you prompt me?"),
@@ -112,6 +121,11 @@ def _default_briefing(raw_input: str) -> Briefing:
         custom_instructions=[],
         max_speaking_turns=0,
         auto_respond=False,
+        user_name="",
+        speaking_persona="",
+        decision_authority="Do not make binding commitments unless explicitly authorized in the briefing.",
+        escalation_rules=[],
+        assistant_display_name="",
     )
 
 
@@ -130,6 +144,7 @@ def _parse_with_llm(raw_input: str) -> dict[str, Any] | None:
         "meeting_title": "short title",
         "meeting_objective": "expected meeting outcome",
         "attendees": ["names or roles"],
+        "user_name": "the name the agent should use when speaking as the user",
         "user_role": "role the human user wants to play",
         "agent_mode": [mode.value for mode in AgentMode],
         "talking_points": ["points the user wants raised"],
@@ -139,6 +154,10 @@ def _parse_with_llm(raw_input: str) -> dict[str, Any] | None:
         "custom_instructions": ["per-meeting rules"],
         "max_speaking_turns": "integer, 0 means silent observer",
         "auto_respond": "boolean",
+        "speaking_persona": "how the user naturally sounds, including tone, phrases, preferences",
+        "decision_authority": "what the agent may decide or commit to on the user's behalf",
+        "escalation_rules": ["situations where the agent should defer, ask for help, or avoid answering"],
+        "assistant_display_name": "transparent meeting display name, for example 'Sai - AI Assistant'",
     }
     prompt = (
         "Extract a complete AI meeting assistant briefing from the user's raw text. "
@@ -178,16 +197,27 @@ def _parse_with_rules(raw_input: str) -> dict[str, Any]:
     data: dict[str, Any] = {}
     data["agent_mode"] = _detect_mode(lower).value
     data["auto_respond"] = _detect_auto_respond(lower, data["agent_mode"])
-    data["max_speaking_turns"] = _detect_max_turns(lower, data["agent_mode"])
+    data["max_speaking_turns"] = (
+        _extract_labeled_value(text, ["max speaking turns", "speaking turns", "max turns"])
+        or _detect_max_turns(lower, data["agent_mode"])
+    )
     data["response_style"] = _detect_response_style(lower)
     data["meeting_title"] = _extract_labeled_value(text, ["title", "meeting"]) or _clean_title(_first_non_empty_line(text))
     data["meeting_objective"] = _extract_labeled_value(text, ["objective", "goal", "outcome"]) or ""
     data["attendees"] = _extract_list(text, ["attendees", "attending", "who"])
+    data["user_name"] = _extract_labeled_value(text, ["user name", "my name", "name"]) or ""
     data["talking_points"] = _extract_list(text, ["talking points", "points", "raise"])
     data["topics_to_avoid"] = _extract_list(text, ["avoid", "topics to avoid", "do not discuss"])
     data["background_context"] = _extract_labeled_value(text, ["context", "background"]) or text
     data["user_role"] = _extract_labeled_value(text, ["user role", "my role", "role"]) or ""
     data["custom_instructions"] = _extract_list(text, ["instructions", "rules"])
+    data["speaking_persona"] = _extract_labeled_value(text, ["speaking persona", "persona", "sound like me", "speaking style"]) or ""
+    data["decision_authority"] = _extract_labeled_value(text, ["decision authority", "authority", "can decide", "commitments"]) or ""
+    data["escalation_rules"] = _extract_list(text, ["escalation rules", "escalate", "ask me when", "defer"])
+    data["assistant_display_name"] = _extract_labeled_value(
+        text,
+        ["assistant display name", "meeting display name", "display name", "join name"],
+    ) or ""
     return data
 
 
@@ -224,6 +254,14 @@ def _briefing_from_mapping(data: dict[str, Any]) -> Briefing:
         custom_instructions=_coerce_str_list(data.get("custom_instructions")),
         max_speaking_turns=max(0, max_turns),
         auto_respond=auto_respond,
+        user_name=str(data.get("user_name") or "").strip(),
+        speaking_persona=str(data.get("speaking_persona") or "").strip(),
+        decision_authority=str(
+            data.get("decision_authority")
+            or "Do not make binding commitments unless explicitly authorized in the briefing."
+        ).strip(),
+        escalation_rules=_coerce_str_list(data.get("escalation_rules")),
+        assistant_display_name=str(data.get("assistant_display_name") or "").strip(),
     )
 
 
@@ -280,6 +318,8 @@ def _coerce_int(value: Any, default: int) -> int:
 
 def _detect_mode(lower_text: str) -> AgentMode:
     if any(term in lower_text for term in ["full proxy", "speak on my behalf", "as me", "proxy"]):
+        return AgentMode.FULL_PROXY
+    if any(term in lower_text for term in ["attend on my behalf", "represent me", "stand in for me"]):
         return AgentMode.FULL_PROXY
     if any(term in lower_text for term in ["advisor", "adviser", "whisper", "suggestions", "text-only", "text only"]):
         return AgentMode.ADVISOR

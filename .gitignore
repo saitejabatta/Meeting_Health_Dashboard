@@ -18,6 +18,7 @@ datasets/
 meeting_audio/
 recordings/
 dashboard/data/
+assistant_profiles/
 
 # Mac
 .DS_Store
